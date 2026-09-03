@@ -168,12 +168,12 @@
             </CardContent>
           </Card>
 
-          <Card v-if="events && events.length > 0">
+          <Card v-if="showEventsCard">
             <CardHeader>
               <CardTitle>Events</CardTitle>
             </CardHeader>
             <CardContent>
-              <div class="space-y-4">
+              <div v-if="events && events.length > 0" class="space-y-4">
                 <div v-for="event in events" :key="event.timestamp" class="flex items-start gap-4 pb-4 border-b last:border-0">
                   <div class="mt-1">
                     <ArrowUpCircle v-if="event.type === 'HEALTHY'" class="h-5 w-5 text-green-500" />
@@ -182,10 +182,16 @@
                   </div>
                   <div class="flex-1">
                     <p class="font-medium">{{ event.fancyText }}</p>
+                    <p v-if="event.fancyErrors && event.fancyErrors.length > 0" class="text-sm text-red-500 mt-0.5">
+                      {{ event.fancyErrors }}
+                    </p>
                     <p class="text-sm text-muted-foreground">{{ prettifyTimestamp(event.timestamp) }} • {{ event.fancyTimeAgo }}</p>
                   </div>
                 </div>
               </div>
+              <p v-else class="text-sm text-muted-foreground">
+                No events were recorded during the time range of the results shown on this page.
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -249,6 +255,10 @@ const toggleShowAverageResponseTime = () => {
   showAverageResponseTime.value = !showAverageResponseTime.value
   localStorage.setItem('gatus:show-average-response-time', showAverageResponseTime.value ? 'true' : 'false')
 }
+
+const showEventsCard = computed(() => {
+  return (endpointStatus.value && endpointStatus.value.results && endpointStatus.value.results.length > 0) || (events.value && events.value.length > 0)
+})
 
 const pageAverageResponseTime = computed(() => {
   // Use endpointStatus for current page's average response time
@@ -348,6 +358,36 @@ const fetchData = async () => {
           }
           event.fancyTimeAgo = generatePrettyTimeAgo(event.timestamp)
           processedEvents.push(event)
+        }
+      }
+      if (data.results && data.results.length > 0) {
+        const windowStart = new Date(data.results[0].timestamp).getTime()
+        const windowEnd = new Date(data.results[data.results.length - 1].timestamp).getTime()
+        processedEvents = processedEvents.filter(event => {
+          const eventTime = new Date(event.timestamp).getTime()
+          return eventTime >= windowStart - 1000 && eventTime <= windowEnd
+        })
+        for (const event of processedEvents) {
+          if (event.type !== 'UNHEALTHY') continue
+          let result = null
+          const eventTime = new Date(event.timestamp).getTime()
+          for (const candidate of data.results) {
+            const candidateTime = new Date(candidate.timestamp).getTime()
+            if (candidateTime === eventTime) {
+              result = candidate
+              break
+            }
+            if (result === null || Math.abs(candidateTime - eventTime) < Math.abs(new Date(result.timestamp).getTime() - eventTime)) {
+              result = candidate
+            }
+          }
+          if (result) {
+            if (result.errors && result.errors.length > 0) {
+              event.fancyErrors = result.errors.join('; ')
+            } else if (result.status) {
+              event.fancyErrors = `HTTP ${result.status}`
+            }
+          }
         }
       }
       events.value = processedEvents

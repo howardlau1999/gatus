@@ -19,3 +19,7 @@ node_modules
 gatus
 config/config.yml
 config.yaml
+
+# Demo (local dev)
+.demo/
+.demo-seed/
