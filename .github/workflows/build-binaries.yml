@@ -27,25 +27,10 @@ jobs:
             artifact: gatus-linux-arm64
             binary-suffix: ""
           - runs-on: ubuntu-latest
-            goos: linux
-            goarch: arm/v7
-            artifact: gatus-linux-arm-v7
-            binary-suffix: ""
-          - runs-on: ubuntu-latest
-            goos: linux
-            goarch: arm/v6
-            artifact: gatus-linux-arm-v6
-            binary-suffix: ""
-          - runs-on: ubuntu-latest
             goos: windows
             goarch: amd64
             artifact: gatus-windows-amd64
             binary-suffix: ".exe"
-          - runs-on: macos-latest
-            goos: darwin
-            goarch: amd64
-            artifact: gatus-darwin-amd64
-            binary-suffix: ""
           - runs-on: macos-latest
             goos: darwin
             goarch: arm64
