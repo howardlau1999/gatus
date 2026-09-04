@@ -360,33 +360,22 @@ const fetchData = async () => {
           processedEvents.push(event)
         }
       }
-      if (data.results && data.results.length > 0) {
-        const windowStart = new Date(data.results[0].timestamp).getTime()
-        const windowEnd = new Date(data.results[data.results.length - 1].timestamp).getTime()
-        processedEvents = processedEvents.filter(event => {
-          const eventTime = new Date(event.timestamp).getTime()
-          return eventTime >= windowStart - 1000 && eventTime <= windowEnd
-        })
-        for (const event of processedEvents) {
-          if (event.type !== 'UNHEALTHY') continue
-          let result = null
-          const eventTime = new Date(event.timestamp).getTime()
-          for (const candidate of data.results) {
-            const candidateTime = new Date(candidate.timestamp).getTime()
-            if (candidateTime === eventTime) {
-              result = candidate
-              break
-            }
-            if (result === null || Math.abs(candidateTime - eventTime) < Math.abs(new Date(result.timestamp).getTime() - eventTime)) {
-              result = candidate
-            }
+      for (const event of processedEvents) {
+        if (event.type !== 'UNHEALTHY') continue
+        const eventTime = new Date(event.timestamp).getTime()
+        let result = null
+        for (const candidate of data.results || []) {
+          const candidateTime = new Date(candidate.timestamp).getTime()
+          if (Math.abs(candidateTime - eventTime) <= 1000) {
+            result = candidate
+            break
           }
-          if (result) {
-            if (result.errors && result.errors.length > 0) {
-              event.fancyErrors = result.errors.join('; ')
-            } else if (result.status) {
-              event.fancyErrors = `HTTP ${result.status}`
-            }
+        }
+        if (result) {
+          if (result.errors && result.errors.length > 0) {
+            event.fancyErrors = result.errors.join('; ')
+          } else if (result.status) {
+            event.fancyErrors = `HTTP ${result.status}`
           }
         }
       }
