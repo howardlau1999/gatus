@@ -2,11 +2,13 @@ package store
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/TwiN/gatus/v5/config/endpoint"
+	"github.com/TwiN/gatus/v5/config/suite"
 	"github.com/TwiN/gatus/v5/storage"
 	"github.com/TwiN/gatus/v5/storage/store/common"
 	"github.com/TwiN/gatus/v5/storage/store/common/paging"
@@ -103,7 +105,7 @@ func initStoresAndBaseScenarios(t *testing.T, testName string) []*Scenario {
 	if err != nil {
 		t.Fatal("failed to create store:", err.Error())
 	}
-	return []*Scenario{
+	scenarios := []*Scenario{
 		{
 			Name:  "memory",
 			Store: memoryStore,
@@ -117,6 +119,11 @@ func initStoresAndBaseScenarios(t *testing.T, testName string) []*Scenario {
 			Store: sqliteStoreWithCaching,
 		},
 	}
+	if os.Getenv("GATUS_TEST_CLICKHOUSE_URL") != "" {
+		clickhouseStore, _ := newClickHouseTestStore(t)
+		scenarios = append(scenarios, &Scenario{Name: "clickhouse", Store: clickhouseStore})
+	}
+	return scenarios
 }
 
 func cleanUp(scenarios []*Scenario) {
@@ -166,6 +173,65 @@ func TestStore_GetEndpointStatusByKey(t *testing.T) {
 				t.Fatalf("endpointStatus.Results should've had 3 entries")
 			}
 			scenario.Store.Clear()
+		})
+	}
+}
+
+func TestStore_ResultPaginationPreservesInsertionOrder(t *testing.T) {
+	scenarios := initStoresAndBaseScenarios(t, "TestStore_ResultPaginationPreservesInsertionOrder")
+	defer cleanUp(scenarios)
+	for _, scenario := range scenarios {
+		t.Run(scenario.Name, func(t *testing.T) {
+			// External checks can arrive late or share a timestamp. A new arrival
+			// must remain the newest result, as it does in memory and SQL storage.
+			for i, timestamp := range []time.Time{now, now.Add(-time.Hour), now} {
+				if err := scenario.Store.InsertEndpointResult(&testEndpoint, &endpoint.Result{
+					Timestamp: timestamp, Success: i != 1, Duration: time.Duration(i+1) * time.Millisecond,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			status, err := scenario.Store.GetEndpointStatusByKey(testEndpoint.Key(), paging.NewEndpointStatusParams().WithResults(1, 2).WithEvents(1, 2))
+			if err != nil || status == nil {
+				t.Fatalf("result page: status=%+v err=%v", status, err)
+			}
+			if len(status.Results) != 2 || status.Results[0].Duration != 2*time.Millisecond || status.Results[1].Duration != 3*time.Millisecond {
+				t.Fatalf("latest page did not preserve insertion order: %+v", status.Results)
+			}
+			if len(status.Events) != 2 || status.Events[0].Type != endpoint.EventUnhealthy || status.Events[1].Type != endpoint.EventHealthy {
+				t.Fatalf("event transitions did not follow insertion order: %+v", status.Events)
+			}
+		})
+	}
+}
+
+func TestStore_DeletingSuitePreservesOnlyStandaloneResults(t *testing.T) {
+	scenarios := initStoresAndBaseScenarios(t, "TestStore_DeletingSuitePreservesOnlyStandaloneResults")
+	defer cleanUp(scenarios)
+	for _, scenario := range scenarios {
+		t.Run(scenario.Name, func(t *testing.T) {
+			ep := &endpoint.Endpoint{Name: "shared-endpoint", Group: "group"}
+			if err := scenario.Store.InsertEndpointResult(ep, &endpoint.Result{Timestamp: now, Duration: time.Millisecond, Success: true}); err != nil {
+				t.Fatal(err)
+			}
+			su := &suite.Suite{Name: "suite", Group: ep.Group}
+			if err := scenario.Store.InsertSuiteResult(su, &suite.Result{
+				Timestamp: now.Add(time.Minute), Success: true,
+				EndpointResults: []*endpoint.Result{{Name: ep.Name, Timestamp: now.Add(time.Minute), Duration: 2 * time.Millisecond, Success: true}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if deleted := scenario.Store.DeleteAllSuiteStatusesNotInKeys(nil); deleted != 1 {
+				t.Fatalf("deleted %d suites, want 1", deleted)
+			}
+			status, err := scenario.Store.GetEndpointStatusByKey(ep.Key(), paging.NewEndpointStatusParams().WithResults(1, 10))
+			if err != nil || status == nil || len(status.Results) != 1 || status.Results[0].Duration != time.Millisecond {
+				t.Fatalf("deleted suite left child results in shared endpoint: status=%+v err=%v", status, err)
+			}
+			newer, err := scenario.Store.HasEndpointStatusNewerThan(ep.Key(), now)
+			if err != nil || newer {
+				t.Fatalf("deleted suite child is still counted as a newer result: newer=%t err=%v", newer, err)
+			}
 		})
 	}
 }

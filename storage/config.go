@@ -2,6 +2,9 @@ package storage
 
 import (
 	"errors"
+	"fmt"
+	"net/url"
+	"time"
 )
 
 const (
@@ -36,6 +39,44 @@ type Config struct {
 
 	// MaximumNumberOfEvents is the number of events each endpoint should be able to provide
 	MaximumNumberOfEvents int `yaml:"maximum-number-of-events,omitempty"`
+
+	ClickHouse *ClickHouseConfig `yaml:"clickhouse,omitempty"`
+}
+
+// ClickHouseConfig configures ClickHouse's HTTP interface (normally port 8123,
+// or 8443 for HTTPS), not the native TCP interface on port 9000.
+type ClickHouseConfig struct {
+	Address  string        `yaml:"address"`
+	Database string        `yaml:"database"`
+	Username string        `yaml:"username,omitempty"`
+	Password string        `yaml:"password,omitempty"`
+	Timeout  time.Duration `yaml:"timeout,omitempty"`
+}
+
+func (c *ClickHouseConfig) ValidateAndSetDefaults() error {
+	if c == nil {
+		return errors.New("clickhouse storage requires a clickhouse configuration")
+	}
+	u, err := url.Parse(c.Address)
+	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return errors.New("clickhouse address must be an HTTP(S) server URL without credentials, path or query")
+	}
+	if u.Port() == "9000" || u.Port() == "9440" {
+		return errors.New("clickhouse address must use the HTTP interface, not native TCP port 9000/9440")
+	}
+	if c.Database == "" {
+		return errors.New("clickhouse database must be specified")
+	}
+	if c.Username == "" {
+		c.Username = "default"
+	}
+	if c.Timeout < 0 {
+		return errors.New("clickhouse timeout must be positive")
+	}
+	if c.Timeout == 0 {
+		c.Timeout = 30 * time.Second
+	}
+	return nil
 }
 
 // ValidateAndSetDefaults validates the configuration and sets the default values (if applicable)
@@ -48,6 +89,17 @@ func (c *Config) ValidateAndSetDefaults() error {
 	}
 	if c.Type == TypeMemory && len(c.Path) > 0 {
 		return ErrMemoryStorageDoesNotSupportPath
+	}
+	if c.Type == TypeClickHouse {
+		if c.Path != "" {
+			return errors.New("clickhouse storage uses storage.clickhouse, not storage.path")
+		}
+		if c.Caching {
+			return errors.New("clickhouse storage does not support storage.caching")
+		}
+		if err := c.ClickHouse.ValidateAndSetDefaults(); err != nil {
+			return fmt.Errorf("invalid clickhouse configuration: %w", err)
+		}
 	}
 	if c.MaximumNumberOfResults <= 0 {
 		c.MaximumNumberOfResults = DefaultMaximumNumberOfResults

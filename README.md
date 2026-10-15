@@ -598,7 +598,7 @@ If at least one announcement is archived, a **Past Announcements** section will 
 |:------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------|:-----------|
 | `storage`                           | Storage configuration                                                                                                                              | `{}`       |
 | `storage.path`                      | Path to persist the data in. Only supported for types `sqlite` and `postgres`.                                                                     | `""`       |
-| `storage.type`                      | Type of storage. Valid types: `memory`, `sqlite`, `postgres`.                                                                                      | `"memory"` |
+| `storage.type`                      | Type of storage. Valid types: `memory`, `sqlite`, `postgres`, `clickhouse`.                                                                        | `"memory"` |
 | `storage.caching`                   | Whether to use write-through caching. Improves loading time for large dashboards. <br />Only supported if `storage.type` is `sqlite` or `postgres` | `false`    |
 | `storage.maximum-number-of-results` | The maximum number of results that an endpoint can have                                                                                            | `100`      |
 | `storage.maximum-number-of-events`  | The maximum number of events that an endpoint can have                                                                                             | `50`       |
@@ -630,6 +630,37 @@ storage:
   path: "postgres://user:password@127.0.0.1:5432/gatus?sslmode=disable"
 ```
 See [examples/docker-compose-postgres-storage](.examples/docker-compose-postgres-storage) for an example.
+
+- If `storage.type` is `clickhouse`, configure an existing ClickHouse database:
+```yaml
+storage:
+  type: clickhouse
+  clickhouse:
+    address: "${GATUS_CLICKHOUSE_ADDRESS}" # e.g. http://localhost:8123
+    database: "${GATUS_CLICKHOUSE_DATABASE}"
+    username: "${GATUS_CLICKHOUSE_USERNAME}"
+    password: "${GATUS_CLICKHOUSE_PASSWORD}"
+    timeout: 30s
+  maximum-number-of-results: 2000
+  maximum-number-of-events: 50
+```
+
+The address uses the ClickHouse HTTP(S) protocol, not native TCP port 9000.
+The database name is required; Gatus creates new `gatus_*` tables inside it.
+The username defaults to `default`, and the request timeout defaults to `30s`.
+Use environment variables for credentials. A database belongs to one Gatus
+deployment and can contain all of its endpoint groups.
+
+For ClickHouse, `maximum-number-of-results` and `maximum-number-of-events`
+limit the history returned to the dashboard. Raw history is retained in
+ClickHouse for analysis; these settings do not delete rows. Endpoint/suite
+removal and clearing the store hide history using generations and tombstones.
+There is no automatic TTL: deleting raw live results also removes their uptime
+contributions, so plan archival together with aggregate preservation.
+Run one Gatus writer per database and stop it while importing SQLite history.
+
+See [ClickHouse migration](docs/clickhouse-migration.md) for the SQLite migration
+command, backup procedure, verification, and rollback instructions.
 
 
 ### Client configuration
