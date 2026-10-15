@@ -8,6 +8,7 @@ import (
 	"github.com/TwiN/gatus/v5/config/endpoint"
 	"github.com/TwiN/gatus/v5/config/suite"
 	"github.com/TwiN/gatus/v5/storage"
+	"github.com/TwiN/gatus/v5/storage/store/clickhouse"
 	"github.com/TwiN/gatus/v5/storage/store/common/paging"
 	"github.com/TwiN/gatus/v5/storage/store/memory"
 	"github.com/TwiN/gatus/v5/storage/store/sql"
@@ -90,6 +91,7 @@ var (
 	// Validate interface implementation on compile
 	_ Store = (*memory.Store)(nil)
 	_ Store = (*sql.Store)(nil)
+	_ Store = (*clickhouse.Store)(nil)
 )
 
 var (
@@ -137,6 +139,11 @@ func Initialize(cfg *storage.Config) error {
 	}
 	ctx, cancelFunc = context.WithCancel(context.Background())
 	switch cfg.Type {
+	case storage.TypeClickHouse:
+		store, err = clickhouse.NewStore(cfg.ClickHouse, cfg.MaximumNumberOfResults, cfg.MaximumNumberOfEvents)
+		if err != nil {
+			return err
+		}
 	case storage.TypeSQLite, storage.TypePostgres:
 		store, err = sql.NewStore(string(cfg.Type), cfg.Path, cfg.Caching, cfg.MaximumNumberOfResults, cfg.MaximumNumberOfEvents)
 		if err != nil {
